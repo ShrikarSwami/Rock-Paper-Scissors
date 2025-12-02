@@ -1,77 +1,353 @@
 # Rock Paper Scissors CV
 
-Webcam based Rock Paper Scissors where you can play against an AI opponent or share the camera with a friend for split screen local multiplayer. The game uses OpenCV and a custom hand detector so you can throw real gestures instead of pressing buttons.
+A webcam based Rock Paper Scissors game built with OpenCV and real-time hand tracking.  
+Play against an AI opponent or enter a split-screen mode for two players.  
+The game detects real hand gestures and manages countdowns, scoring, and full match flow.
+
+---
 
 ## Features
 
-- **Two ways to play**
-  - **Versus AI**. Stand in front of the camera and play Rock Paper Scissors against an automated opponent. The AI chooses its move while the game reads your hand gesture.
-  - **Two player mode**. The screen is split into a red tinted left side and a blue tinted right side. Each player has a lane to place their hand and the game tracks both gestures at the same time.
+### 🎮 Game Modes
 
-- **Best of three with win by two**
-  - The match score is tracked for each side.
-  - First to at least three points and leading by two wins the match.
-  - Works the same in AI and two player mode.
+#### **Single Player (vs AI)**
+- Detects your hand gesture from the webcam.
+- AI selects its move each round.
+- Displays results, handles scoring, and determines match winners.
 
-- **Visual countdown and match flow**
-  - When a valid hand or both hands are detected the game starts a three second countdown.
-  - A large timer and optional beeps lead into the final “GO” moment.
-  - The game then locks in both gestures, shows symbols and the result, then returns to waiting for the next round.
+#### **Two Player Mode**
+- Screen is split vertically: left (red) for Player 1, right (blue) for Player 2.
+- Detects both players' gestures simultaneously.
+- Full competitive match flow.
 
-- **In game controls**
-  - `p` to pause.
-  - `m` to return to the main menu.
-  - `q` to quit from anywhere.
+---
 
-- **Sound effects (optional)**
-  - Short beeps during the countdown.
-  - Celebration and reaction sounds on wins and losses when your sound files are available.
+### 🧠 Gameplay System
+
+- Real time gesture detection using a custom MediaPipe-based detector.
+- Three second countdown with on-screen timer and optional sound cues.
+- Round result overlay including symbols and win/tie messages.
+- Best of three with win by two scoring system.
+- Match winner state with prompts to restart or return to menu.
+
+---
+
+### 🔊 Sound Effects
+
+If `simpleaudio` is installed and sound files exist under `sounds/`, the game plays:
+- Countdown beeps  
+- “Go” sound  
+- Win/loss reactions  
+
+Missing audio files do not prevent the game from running.
+
+---
 
 ## Opponents
 
-You can go up against two kinds of opponents.
+### **🤖 AI Opponent**
+- AI randomly selects Rock, Paper, or Scissors.
+- Your gesture is read from the webcam and evaluated against the AI.
 
-- **Computer opponent**. In single player mode the right side of the scoreboard belongs to the AI. The AI picks rock, paper or scissors for each round while your hand gesture is read from the webcam feed.
-- **Human opponent**. In multi player mode another person stands on the other side of the frame. One player uses the red tinted half of the screen, the other uses the blue tinted half, and both throws are evaluated at the same time.
+### **🧍🧍 Two Human Players**
+- Two players stand on opposite halves of the camera frame.
+- Gestures are read from both sides at the same time.
 
-## How it works
+---
 
-The core pieces of the project are:
+## File Overview
 
-- `main.py`  
-  Opens the webcam with OpenCV, sets up the main loop, handles the menu, state transitions and keyboard controls. It also defines the single player and multi player flow, countdown timing and score handling.
+### `main.py`
+- Controls webcam loop, UI rendering, countdowns, and game state transitions.
+- Manages scoring, match endings, pause/menu behavior, and gesture interpretation.
 
-- `hand_detextor.py`  
-  Exposes a `HandDetector` class that looks at each frame and returns predictions. Each prediction includes a gesture label and a center point, which lets the game decide whether a hand counts for the left player, the right player, or the single player.
+### `game_logic.py`
+- Defines valid gestures.
+- Contains round result logic.
+- AI move selection.
+- Score tracking with “win by two” match end conditions.
+- Helper functions for gesture symbols and formatting.
 
-- `game_logic.py`  
-  Contains game specific helpers:
-  - `GESTURES` list for the valid moves (rock, paper, scissors).
-  - `ScoreTracker` which knows round scores, match scores and when someone has won a best of three with win by two.
-  - Functions like `choose_ai_move`, `decide_winner` and `move_to_symbol` which pick the AI move, decide who won the round and format moves for display.
+### `hand_detextor.py`
+- Core hand detection logic.
+- Converts landmarks or predictions into gesture labels.
+- Returns predictions with gesture name and center coordinates.
 
-- `SoundPlayer` inside `main.py`  
-  A small helper around `simpleaudio` that loads wav files from the `sounds/` folder (for example `beep.wav`, `cheer.wav`, `boo.wav`, `yay.wav`). If audio is not available it safely falls back to a console beep so the game still runs.
+### `sounds/`
+Optional audio files:
+- `beep.wav`
+- `cheer.wav`
+- `boo.wav`
+- `yay.wav`
 
-Everything is drawn directly onto the camera frames using OpenCV, including overlays for text, countdown, scores and the red or blue tint for each side in two player mode.
+---
 
 ## Requirements
 
-- Python 3.10  
-  MediaPipe and some of the vision related tooling work best here, and Python 3.12 plus often breaks hand tracking stacks.
-- A working webcam.
-- A reasonably recent version of `pip`.
+### Python Version
+- **Python 3.10 recommended**
+- Other versions may break MediaPipe compatibility.
 
-Python libraries used:
-
-- `opencv-python` for video capture and drawing.
-- `mediapipe` or a similar backend inside `hand_detextor.py` to perform hand tracking.
-- `simpleaudio` for sound playback (optional, but recommended for full experience).
-
-## Setup
-
-Clone the repository:
+### Dependencies
+Install using:
 
 ```bash
+pip install -r requirements.txt
+Dependencies include:
+
+opencv-python
+
+mediapipe
+
+simpleaudio (optional)
+
+Setup
+1. Clone the repository
+bash
+Copy code
 git clone https://github.com/ShrikarSwami/Rock-Paper-Scissors.git
 cd Rock-Paper-Scissors
+2. Set Python version (if using pyenv)
+bash
+Copy code
+pyenv local 3.10.12
+3. Create and activate virtual environment
+bash
+Copy code
+python -m venv .venv
+source .venv/bin/activate
+4. Install dependencies
+bash
+Copy code
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install simpleaudio
+Running the Game
+bash
+Copy code
+python main.py
+Controls
+1 — Start single player mode
+
+2 — Start two player mode
+
+p — Pause
+
+m — Return to menu
+
+q — Quit
+
+Project Structure
+arduino
+Copy code
+Rock-Paper-Scissors/
+├── main.py
+├── game_logic.py
+├── hand_detextor.py
+├── sounds/
+│   ├── beep.wav
+│   ├── cheer.wav
+│   ├── boo.wav
+│   └── yay.wav
+├── requirements.txt
+└── README.md
+Future Ideas
+Difficulty settings for AI
+
+Larger and animated gesture icons
+
+Match analytics/history
+
+Gesture calibration mode
+
+Additional gesture sets (e.g., Lizard Spock)
+
+Animated overlays and polish
+
+yaml
+Copy code
+
+---
+
+If you want a **Markdown wiki homepage**, **installation guide**, **developer guide**, or **character wiki in the same style**, tell me and I’ll generate it the same way.
+
+
+
+
+
+You said:
+no you're doing it wrong
+
+make it so its all in like the code way and not any prompt
+
+
+
+
+ChatGPT said:
+Understood.
+Here is the README only as a Markdown code block, with no explanation before or after.
+
+markdown
+Copy code
+# Rock Paper Scissors CV
+
+A webcam based Rock Paper Scissors game built with OpenCV and real-time hand tracking.  
+Play against an AI opponent or enter a split-screen mode for two players.  
+The game detects real hand gestures and manages countdowns, scoring, and match flow.
+
+---
+
+## Features
+
+### 🎮 Game Modes
+
+#### Single Player (vs AI)
+- Detects your hand gesture from the webcam.
+- AI selects its move for each round.
+- Handles scoring, round results, and match winners.
+
+#### Two Player Mode
+- Split screen: left (red) for Player 1, right (blue) for Player 2.
+- Detects both gestures simultaneously.
+- Competitive round flow with full scoring.
+
+---
+
+### 🧠 Gameplay System
+- Real time gesture detection via a MediaPipe-based detector.
+- Three second countdown with sound cues.
+- Round result overlays with gesture symbols.
+- Best of three with win by two scoring.
+- Match winner state with restart and menu options.
+
+---
+
+### 🔊 Sound Effects
+If `simpleaudio` is installed and sound files exist in `sounds/`, audio will play for:
+- Countdown beeps  
+- “Go” sound  
+- Win/loss reactions  
+
+Game still functions without audio files.
+
+---
+
+## Opponents
+
+### AI Opponent
+- AI chooses Rock, Paper, or Scissors.
+- Your gesture is detected through the webcam.
+
+### Two Human Players
+- Each player uses their designated half of the frame.
+- Both moves are detected and compared simultaneously.
+
+---
+
+## File Overview
+
+### `main.py`
+- Webcam loop  
+- Mode switching  
+- Countdown logic  
+- UI rendering  
+- Score and match handling  
+- Pause and menu functionality  
+
+### `game_logic.py`
+- Valid gesture definitions  
+- Round outcome logic  
+- AI move selection  
+- ScoreTracker class  
+- Symbol formatting helpers  
+
+### `hand_detextor.py`
+- Hand detection and gesture classification  
+- Prediction objects with gesture and center coordinates  
+
+### `sounds/`
+Optional audio files:
+- `beep.wav`
+- `cheer.wav`
+- `boo.wav`
+- `yay.wav`
+
+---
+
+## Requirements
+
+### Python Version
+- Python **3.10 recommended**
+
+### Install Dependencies
+```bash
+pip install -r requirements.txt
+Setup
+Clone Repository
+bash
+Copy code
+git clone https://github.com/ShrikarSwami/Rock-Paper-Scissors.git
+cd Rock-Paper-Scissors
+Set Python Version (pyenv)
+bash
+Copy code
+pyenv local 3.10.12
+Create & Activate Virtual Environment
+bash
+Copy code
+python -m venv .venv
+source .venv/bin/activate
+Install Packages
+bash
+Copy code
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install simpleaudio
+Running the Game
+bash
+Copy code
+python main.py
+Controls
+1 — Single player
+
+2 — Two player
+
+p — Pause
+
+m — Menu
+
+q — Quit
+
+Project Structure
+arduino
+Copy code
+Rock-Paper-Scissors/
+├── main.py
+├── game_logic.py
+├── hand_detextor.py
+├── sounds/
+│   ├── beep.wav
+│   ├── cheer.wav
+│   ├── boo.wav
+│   └── yay.wav
+├── requirements.txt
+└── README.md
+Future Ideas
+AI difficulty settings
+
+Animated gesture icons
+
+Match history
+
+Gesture calibration
+
+Extra gesture sets (Lizard Spock)
+
+UI animation improvements
+
+yaml
+Copy code
+
+---
+
+If you want this added **directly into your repo as a commit**, or want a **Wiki Home Page**, I can generate that next.
