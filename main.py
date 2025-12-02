@@ -1,6 +1,9 @@
+import random
 import time
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+
+import numpy as np
 
 import cv2
 
@@ -8,10 +11,13 @@ from game_logic import GESTURES, ScoreTracker, choose_ai_move, decide_winner, mo
 from hand_detextor import HandDetector
 
 BASE_DIR = Path(__file__).resolve().parent
-SOUNDS_DIR = BASE_DIR / "assets" / "sounds"
+ASSETS_DIR = BASE_DIR / "assets"
+SOUNDS_DIR = ASSETS_DIR / "sounds"
+PFP_DIR = ASSETS_DIR / "pfps"
 WINDOW_NAME = "Rock Paper Scissors"
 COUNTDOWN_SECONDS = 4  # slower so players can see AI choice reveal
 RESULT_HOLD_SECONDS = 5.0
+AI_NAMES = ["Kandiddy", "Dhir", "JigglyDith", "JigglyPathi", "Skittles", "Pay Gorn", "Sigeon Pex"]
 SOUND_FILES = {
     "countdown": SOUNDS_DIR / "countdown.mp3",  # plays on 3-2-1 ticks
     "go": SOUNDS_DIR / "go.mp3",  # plays on GO
@@ -31,7 +37,9 @@ class SoundPlayer:
         self.backend = None
         self.pygame = None
         self.sa = None
+        ASSETS_DIR.mkdir(parents=True, exist_ok=True)
         SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+        PFP_DIR.mkdir(parents=True, exist_ok=True)
 
         # Try pygame mixer for mp3 files.
         try:
@@ -92,7 +100,70 @@ def draw_controls(frame) -> None:
         draw_text(frame, label, (w - 180, 30 + idx * 30), scale=0.55)
 
 
-def new_single_ctx() -> Dict:
+def prompt_name(prompt: str, default: str) -> str:
+    try:
+        value = input(prompt).strip()
+        return value or default
+    except Exception:
+        return default
+
+
+def center_square(frame):
+    h, w, _ = frame.shape
+    size = min(h, w)
+    y0 = (h - size) // 2
+    x0 = (w - size) // 2
+    return frame[y0 : y0 + size, x0 : x0 + size]
+
+
+def capture_avatar(name: str, device_index: int = 0) -> None:
+    """
+    Capture a square avatar photo for the given name and save to assets/pfps/<name>.png.
+    Press 'c' to capture, 's' to skip, or 'q' to abort.
+    """
+    cap = cv2.VideoCapture(device_index)
+    if not cap.isOpened():
+        print("Could not open camera for avatar capture; skipping.")
+        return
+
+    window = f"Avatar Capture - {name}"
+    print(f"Capturing avatar for {name}. Press 'c' to capture, 's' to skip.")
+
+    captured = False
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            print("Camera read failed; skipping avatar capture.")
+            break
+
+        display = frame.copy()
+        h, w, _ = display.shape
+        size = min(h, w)
+        y0 = (h - size) // 2
+        x0 = (w - size) // 2
+        cv2.rectangle(display, (x0, y0), (x0 + size, y0 + size), (0, 255, 0), 2)
+        draw_text(display, "Align face, press 'c' to capture, 's' to skip", (20, 30), scale=0.6)
+        cv2.imshow(window, display)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("c"):
+            square = center_square(frame)
+            out_path = PFP_DIR / f"{name}.png"
+            cv2.imwrite(str(out_path), square)
+            print(f"Saved avatar to {out_path}")
+            captured = True
+            break
+        if key in (ord("s"), ord("q"), 27):  # s or q or ESC to skip
+            break
+
+    cap.release()
+    cv2.destroyWindow(window)
+    if captured:
+        AVATAR_CACHE.pop(name, None)
+
+
+def new_single_ctx(player_name: str, ai_name: Optional[str] = None) -> Dict:
+    ai = ai_name or random.choice(AI_NAMES)
     return {
         "score": ScoreTracker(),
         "phase": "waiting",  # waiting -> countdown -> result
@@ -104,10 +175,14 @@ def new_single_ctx() -> Dict:
         "ai_move": None,
         "round_outcome": None,
         "match_winner": None,
+        "player_name": player_name,
+        "ai_name": ai,
+        "player_avatar": load_avatar(player_name),
+        "ai_avatar": load_avatar(ai),
     }
 
 
-def new_multi_ctx() -> Dict:
+def new_multi_ctx(left_name: str, right_name: str) -> Dict:
     return {
         "score": ScoreTracker(),
         "phase": "waiting",
@@ -120,6 +195,10 @@ def new_multi_ctx() -> Dict:
         "right_move": None,
         "round_outcome": None,
         "match_winner": None,
+        "left_name": left_name,
+        "right_name": right_name,
+        "left_avatar": load_avatar(left_name),
+        "right_avatar": load_avatar(right_name),
     }
 
 
@@ -144,7 +223,63 @@ def render_countdown(frame, start_time: float, sound: SoundPlayer, last_second: 
     return last_second
 
 
-def draw_move_cards(frame, left: Tuple[str, str], right: Tuple[str, str]) -> None:
+AVATAR_CACHE: Dict[str, Optional[np.ndarray]] = {}
+
+
+def load_avatar(name: str):
+    """Load avatar image from assets/pfps/<name>.(png|jpg|jpeg), cached."""
+    if not name:
+        return None
+    if name in AVATAR_CACHE:
+        return AVATAR_CACHE[name]
+    for ext in (".png", ".jpg", ".jpeg"):
+        path = PFP_DIR / f"{name}{ext}"
+        if path.exists():
+            img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+            if img is not None:
+                # Drop alpha if present for simplicity.
+                if img.shape[2] == 4:
+                    img = img[:, :, :3]
+                AVATAR_CACHE[name] = img
+                return img
+    AVATAR_CACHE[name] = None
+    return None
+
+
+def _rounded_mask(size: int, radius: int) -> np.ndarray:
+    """Create a rounded-rectangle mask (uint8)."""
+    mask = np.zeros((size, size), dtype=np.uint8)
+    cv2.rectangle(mask, (radius, 0), (size - radius, size), 255, -1)
+    cv2.rectangle(mask, (0, radius), (size, size - radius), 255, -1)
+    cv2.circle(mask, (radius, radius), radius, 255, -1)
+    cv2.circle(mask, (size - radius, radius), radius, 255, -1)
+    cv2.circle(mask, (radius, size - radius), radius, 255, -1)
+    cv2.circle(mask, (size - radius, size - radius), radius, 255, -1)
+    return mask
+
+
+def paste_avatar(card, avatar, top_left: Tuple[int, int]) -> None:
+    if avatar is None:
+        return
+    size = 64
+    radius = 12
+    av = cv2.resize(avatar, (size, size))
+    mask = _rounded_mask(size, radius)
+    x, y = top_left
+    h, w, _ = card.shape
+    if y + size > h or x + size > w:
+        return
+    roi = card[y : y + size, x : x + size]
+    mask_f = mask[:, :, None] / 255.0
+    blended = (av * mask_f + roi * (1 - mask_f)).astype(np.uint8)
+    card[y : y + size, x : x + size] = blended
+
+
+def draw_move_cards(
+    frame,
+    left: Tuple[str, str, Optional[np.ndarray]],
+    right: Tuple[str, str, Optional[np.ndarray]],
+) -> None:
     """Render large cards showing moves so it's obvious who threw what."""
     h, w, _ = frame.shape
     card_w, card_h = 240, 180
@@ -153,13 +288,15 @@ def draw_move_cards(frame, left: Tuple[str, str], right: Tuple[str, str]) -> Non
     right_x = w // 2 + gap // 2
     y = h // 2 - card_h // 2
 
-    for (label, move), x in ((left, left_x), (right, right_x)):
+    for (label, move, avatar), x in ((left, left_x), (right, right_x)):
         cv2.rectangle(frame, (x, y), (x + card_w, y + card_h), (30, 30, 30), -1)
         cv2.rectangle(frame, (x, y), (x + card_w, y + card_h), (200, 200, 200), 2)
-        symbol = move_to_symbol(move)
+        symbol = move_to_symbol(move) if move in GESTURES else "?"
+        move_label = move if move in GESTURES else "unknown"
         draw_text(frame, label, (x + 12, y + 28), scale=0.8, bg=False)
         draw_text(frame, symbol, (x + 20, y + 110), scale=2.5, bg=False)
-        draw_text(frame, move, (x + 12, y + card_h - 20), scale=0.7, bg=False)
+        draw_text(frame, move_label, (x + 12, y + card_h - 20), scale=0.7, bg=False)
+        paste_avatar(frame[y : y + card_h, x : x + card_w], avatar, (card_w - 76, 12))
 
 
 def play_round_sound(sound: SoundPlayer, mode: str, result: str) -> None:
@@ -177,7 +314,9 @@ def play_round_sound(sound: SoundPlayer, mode: str, result: str) -> None:
 
 def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlayer):
     if key == ord("m"):
-        return frame, new_single_ctx(), "menu"
+        return frame, new_single_ctx(ctx["player_name"]), "menu"
+    if key == ord("r") and ctx.get("match_winner"):
+        return frame, new_single_ctx(ctx["player_name"]), "single"
 
     predictions = detector.detect(frame, draw=True)
     for p in predictions:
@@ -185,18 +324,16 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
             ctx["last_move"] = p.gesture
             break
     draw_controls(frame)
-    draw_text(frame, ctx["score"].as_text(("You", "AI")), (40, 40))
+    draw_text(frame, ctx["score"].as_text((ctx["player_name"], ctx["ai_name"])), (40, 40))
 
     if ctx["match_winner"]:
-        label = "You win the match!" if ctx["match_winner"] == "p1" else "AI wins the match!"
+        label = f"{ctx['player_name']} wins the match!" if ctx["match_winner"] == "p1" else f"{ctx['ai_name']} wins the match!"
         draw_text(frame, label, (40, 90))
-        draw_text(frame, "Press space to play again or m for menu", (40, 130), scale=0.65)
-        if key == ord(" "):
-            ctx = new_single_ctx()
+        draw_text(frame, "r: rematch  m: menu  q: quit", (40, 130), scale=0.65)
         return frame, ctx, "single"
 
     if ctx["phase"] == "waiting":
-        draw_text(frame, "Show your hand to start (rock/paper/scissors)", (40, 90), scale=0.7)
+        draw_text(frame, f"{ctx['player_name']}: show your hand to start", (40, 90), scale=0.7)
         if any(p.gesture in GESTURES for p in predictions):
             ctx["phase"] = "countdown"
             ctx["countdown_start"] = time.time()
@@ -223,7 +360,11 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
                 }
             )
     elif ctx["phase"] == "result":
-        draw_move_cards(frame, ("You", ctx["player_move"] or "unknown"), ("AI", ctx["ai_move"] or "unknown"))
+        draw_move_cards(
+            frame,
+            (ctx["player_name"], ctx["player_move"] or "unknown", ctx["player_avatar"]),
+            (ctx["ai_name"], ctx["ai_move"] or "unknown", ctx["ai_avatar"]),
+        )
         if ctx["round_outcome"] == "tie":
             outcome = "Tie - go again"
         elif ctx["round_outcome"] == "invalid":
@@ -247,7 +388,9 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
 
 def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlayer):
     if key == ord("m"):
-        return frame, new_multi_ctx(), "menu"
+        return frame, new_multi_ctx(ctx["left_name"], ctx["right_name"]), "menu"
+    if key == ord("r") and ctx.get("match_winner"):
+        return frame, new_multi_ctx(ctx["left_name"], ctx["right_name"]), "multi"
 
     h, w, _ = frame.shape
     mid_x = w // 2
@@ -268,14 +411,12 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
     cv2.line(frame, (mid_x, 0), (mid_x, h), (200, 200, 200), 1)
 
     draw_controls(frame)
-    draw_text(frame, ctx["score"].as_text(("Left", "Right")), (40, 40))
+    draw_text(frame, ctx["score"].as_text((ctx["left_name"], ctx["right_name"])), (40, 40))
 
     if ctx["match_winner"]:
-        label = "Left player wins the match" if ctx["match_winner"] == "p1" else "Right player wins the match"
+        label = f"{ctx['left_name']} wins the match" if ctx["match_winner"] == "p1" else f"{ctx['right_name']} wins the match"
         draw_text(frame, label, (40, 90))
-        draw_text(frame, "Press space to play again or m for menu", (40, 130), scale=0.65)
-        if key == ord(" "):
-            ctx = new_multi_ctx()
+        draw_text(frame, "r: rematch  m: menu  q: quit", (40, 130), scale=0.65)
         return frame, ctx, "multi"
 
     left = None
@@ -325,7 +466,11 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
                 }
             )
     elif ctx["phase"] == "result":
-        draw_move_cards(frame, ("Left", ctx["left_move"] or "unknown"), ("Right", ctx["right_move"] or "unknown"))
+        draw_move_cards(
+            frame,
+            (ctx["left_name"], ctx["left_move"] or "unknown", ctx["left_avatar"]),
+            (ctx["right_name"], ctx["right_move"] or "unknown", ctx["right_avatar"]),
+        )
         if ctx["round_outcome"] == "tie":
             outcome = "Tie - go again"
         elif ctx["round_outcome"] == "invalid":
@@ -348,6 +493,16 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
 
 
 def main():
+    player_name = prompt_name("Enter your name (default: You): ", "You")
+    if prompt_name(f"Capture avatar for {player_name}? (y/n): ", "n").lower().startswith("y"):
+        capture_avatar(player_name)
+    left_name = prompt_name("Enter left player name (default: Player 1): ", "Player 1")
+    if prompt_name(f"Capture avatar for {left_name}? (y/n): ", "n").lower().startswith("y"):
+        capture_avatar(left_name)
+    right_name = prompt_name("Enter right player name (default: Player 2): ", "Player 2")
+    if prompt_name(f"Capture avatar for {right_name}? (y/n): ", "n").lower().startswith("y"):
+        capture_avatar(right_name)
+
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -355,8 +510,8 @@ def main():
     detector = HandDetector()
     sound = SoundPlayer()
     state = "menu"
-    single_ctx = new_single_ctx()
-    multi_ctx = new_multi_ctx()
+    single_ctx = new_single_ctx(player_name)
+    multi_ctx = new_multi_ctx(left_name, right_name)
     paused = False
 
     while True:
@@ -380,15 +535,17 @@ def main():
         if state == "menu":
             frame = render_menu(frame)
             if key == ord("1"):
-                single_ctx = new_single_ctx()
+                single_ctx = new_single_ctx(player_name)
                 state = "single"
             elif key == ord("2"):
-                multi_ctx = new_multi_ctx()
+                multi_ctx = new_multi_ctx(left_name, right_name)
                 state = "multi"
         elif state == "single":
             frame, single_ctx, state = single_player(frame, key, detector, single_ctx, sound)
         elif state == "multi":
             frame, multi_ctx, state = multi_player(frame, key, detector, multi_ctx, sound)
+        if state == "quit":
+            break
 
         cv2.imshow(WINDOW_NAME, frame)
 
