@@ -7,7 +7,7 @@ import numpy as np
 
 import cv2
 
-from game_logic import GESTURES, ScoreTracker, choose_ai_move, decide_winner, move_to_symbol
+from game_logic import GESTURES, ScoreTracker, choose_ai_move, decide_winner
 from hand_detextor import HandDetector
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -15,7 +15,7 @@ ASSETS_DIR = BASE_DIR / "assets"
 SOUNDS_DIR = ASSETS_DIR / "sounds"
 PFP_DIR = ASSETS_DIR / "pfps"
 WINDOW_NAME = "Rock Paper Scissors"
-COUNTDOWN_SECONDS = 4  # slower so players can see AI choice reveal
+COUNTDOWN_SECONDS = 3  # show 3-2-1 then GO
 RESULT_HOLD_SECONDS = 5.0
 AI_NAMES = ["Kandiddy", "Dhir", "JigglyDith", "JigglyPathi", "Skittles", "Pay Gorn", "Sigeon Pex"]
 SOUND_FILES = {
@@ -93,6 +93,13 @@ def draw_text(frame, text: str, origin: Tuple[int, int], scale: float = 0.8, col
     cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
 
 
+def draw_center_text(frame, text: str, y: int, scale: float = 1.0, color=(255, 255, 255), bg: bool = True) -> None:
+    """Center text horizontally at a given y."""
+    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+    x = frame.shape[1] // 2 - w // 2
+    draw_text(frame, text, (x, y), scale=scale, color=color, bg=bg)
+
+
 def draw_controls(frame) -> None:
     h, w, _ = frame.shape
     controls = ["p: pause", "m: menu", "q: quit"]
@@ -101,11 +108,34 @@ def draw_controls(frame) -> None:
 
 
 def prompt_name(prompt: str, default: str) -> str:
-    try:
-        value = input(prompt).strip()
-        return value or default
-    except Exception:
-        return default
+    return default  # placeholder; not used anymore for GUI input
+
+
+def text_input(prompt: str, default: str) -> str:
+    """
+    On-screen text input; type letters/numbers, backspace to delete, Enter to confirm, ESC to use default.
+    """
+    win = "Enter Text"
+    cv2.namedWindow(win)
+    text = ""
+    while True:
+        canvas = np.zeros((220, 640, 3), dtype=np.uint8)
+        cv2.rectangle(canvas, (10, 10), (630, 210), (80, 80, 80), 2)
+        draw_text(canvas, prompt, (24, 60), scale=0.8, bg=False)
+        draw_text(canvas, text or default, (24, 130), scale=1.0, bg=False)
+        draw_text(canvas, "Enter=OK  ESC=skip", (24, 180), scale=0.6, bg=False)
+        cv2.imshow(win, canvas)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (13, 10):  # Enter
+            cv2.destroyWindow(win)
+            return text or default
+        if key == 27:  # ESC
+            cv2.destroyWindow(win)
+            return default
+        if key == 8:  # Backspace
+            text = text[:-1]
+        elif 32 <= key <= 126:
+            text += chr(key)
 
 
 def center_square(frame):
@@ -116,20 +146,18 @@ def center_square(frame):
     return frame[y0 : y0 + size, x0 : x0 + size]
 
 
-def capture_avatar(name: str, device_index: int = 0) -> None:
+def capture_avatar(name: str, device_index: int = 0) -> Optional[np.ndarray]:
     """
-    Capture a square avatar photo for the given name and save to assets/pfps/<name>.png.
+    Capture a square avatar photo for the given name and return it in memory.
     Press 'c' to capture, 's' to skip, or 'q' to abort.
     """
     cap = cv2.VideoCapture(device_index)
     if not cap.isOpened():
         print("Could not open camera for avatar capture; skipping.")
-        return
+        return None
 
     window = f"Avatar Capture - {name}"
-    print(f"Capturing avatar for {name}. Press 'c' to capture, 's' to skip.")
-
-    captured = False
+    avatar = None
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -142,28 +170,39 @@ def capture_avatar(name: str, device_index: int = 0) -> None:
         y0 = (h - size) // 2
         x0 = (w - size) // 2
         cv2.rectangle(display, (x0, y0), (x0 + size, y0 + size), (0, 255, 0), 2)
-        draw_text(display, "Align face, press 'c' to capture, 's' to skip", (20, 30), scale=0.6)
+        draw_text(display, "Align face, press 'c' to capture, 's' to skip, 'q' to cancel", (20, 30), scale=0.6)
         cv2.imshow(window, display)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("c"):
-            square = center_square(frame)
-            out_path = PFP_DIR / f"{name}.png"
-            cv2.imwrite(str(out_path), square)
-            print(f"Saved avatar to {out_path}")
-            captured = True
+            avatar = center_square(frame)
             break
         if key in (ord("s"), ord("q"), 27):  # s or q or ESC to skip
             break
 
     cap.release()
     cv2.destroyWindow(window)
-    if captured:
-        AVATAR_CACHE.pop(name, None)
+    return avatar
 
 
-def new_single_ctx(player_name: str, ai_name: Optional[str] = None) -> Dict:
+def setup_single_game() -> Dict:
+    name = text_input("Enter your name", "You")
+    avatar = capture_avatar(name)
+    return new_single_ctx(name, avatar)
+
+
+def setup_multi_game() -> Dict:
+    left = text_input("Enter left player name", "Player 1")
+    left_avatar = capture_avatar(left)
+    right = text_input("Enter right player name", "Player 2")
+    right_avatar = capture_avatar(right)
+    return new_multi_ctx(left, left_avatar, right, right_avatar)
+
+
+def new_single_ctx(player_name: str, player_avatar: Optional[np.ndarray], ai_name: Optional[str] = None) -> Dict:
     ai = ai_name or random.choice(AI_NAMES)
+    if player_avatar is None:
+        player_avatar = placeholder_avatar()
     return {
         "score": ScoreTracker(),
         "phase": "waiting",  # waiting -> countdown -> result
@@ -177,12 +216,16 @@ def new_single_ctx(player_name: str, ai_name: Optional[str] = None) -> Dict:
         "match_winner": None,
         "player_name": player_name,
         "ai_name": ai,
-        "player_avatar": load_avatar(player_name),
+        "player_avatar": player_avatar,
         "ai_avatar": load_avatar(ai),
     }
 
 
-def new_multi_ctx(left_name: str, right_name: str) -> Dict:
+def new_multi_ctx(left_name: str, left_avatar: Optional[np.ndarray], right_name: str, right_avatar: Optional[np.ndarray]) -> Dict:
+    if left_avatar is None:
+        left_avatar = placeholder_avatar()
+    if right_avatar is None:
+        right_avatar = placeholder_avatar()
     return {
         "score": ScoreTracker(),
         "phase": "waiting",
@@ -197,8 +240,8 @@ def new_multi_ctx(left_name: str, right_name: str) -> Dict:
         "match_winner": None,
         "left_name": left_name,
         "right_name": right_name,
-        "left_avatar": load_avatar(left_name),
-        "right_avatar": load_avatar(right_name),
+        "left_avatar": left_avatar,
+        "right_avatar": right_avatar,
     }
 
 
@@ -226,10 +269,17 @@ def render_countdown(frame, start_time: float, sound: SoundPlayer, last_second: 
 AVATAR_CACHE: Dict[str, Optional[np.ndarray]] = {}
 
 
+def placeholder_avatar() -> np.ndarray:
+    img = np.full((128, 128, 3), 50, dtype=np.uint8)
+    cv2.rectangle(img, (0, 0), (127, 127), (200, 200, 200), 2)
+    cv2.putText(img, "PFP", (28, 74), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (220, 220, 220), 2, cv2.LINE_AA)
+    return img
+
+
 def load_avatar(name: str):
-    """Load avatar image from assets/pfps/<name>.(png|jpg|jpeg), cached."""
+    """Load persistent avatars for AI/placeholder from disk; user captures are in-memory."""
     if not name:
-        return None
+        name = "placeholder"
     if name in AVATAR_CACHE:
         return AVATAR_CACHE[name]
     for ext in (".png", ".jpg", ".jpeg"):
@@ -237,13 +287,16 @@ def load_avatar(name: str):
         if path.exists():
             img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
             if img is not None:
-                # Drop alpha if present for simplicity.
                 if img.shape[2] == 4:
                     img = img[:, :, :3]
                 AVATAR_CACHE[name] = img
                 return img
-    AVATAR_CACHE[name] = None
-    return None
+    ph = AVATAR_CACHE.get("__placeholder__")
+    if ph is None:
+        ph = placeholder_avatar()
+        AVATAR_CACHE["__placeholder__"] = ph
+    AVATAR_CACHE[name] = ph
+    return ph
 
 
 def _rounded_mask(size: int, radius: int) -> np.ndarray:
@@ -291,12 +344,32 @@ def draw_move_cards(
     for (label, move, avatar), x in ((left, left_x), (right, right_x)):
         cv2.rectangle(frame, (x, y), (x + card_w, y + card_h), (30, 30, 30), -1)
         cv2.rectangle(frame, (x, y), (x + card_w, y + card_h), (200, 200, 200), 2)
-        symbol = move_to_symbol(move) if move in GESTURES else "?"
-        move_label = move if move in GESTURES else "unknown"
+        mv = move or ""
+        symbol = mv.upper() if mv in GESTURES else ""
+        move_label = mv if mv in GESTURES else "unknown"
         draw_text(frame, label, (x + 12, y + 28), scale=0.8, bg=False)
-        draw_text(frame, symbol, (x + 20, y + 110), scale=2.5, bg=False)
+        draw_text(frame, symbol, (x + 20, y + 110), scale=1.6, bg=False)
         draw_text(frame, move_label, (x + 12, y + card_h - 20), scale=0.7, bg=False)
         paste_avatar(frame[y : y + card_h, x : x + card_w], avatar, (card_w - 76, 12))
+
+
+def draw_corner_profiles(frame, left: Tuple[str, np.ndarray], right: Tuple[str, np.ndarray]) -> None:
+    """Always display names + avatars in bottom corners."""
+    h, w, _ = frame.shape
+    size = 64
+    pad = 12
+    # Left
+    lx, ly = pad, h - size - pad
+    cv2.rectangle(frame, (lx - 4, ly - 4), (lx + size + 140, ly + size + 8), (0, 0, 0), -1)
+    cv2.rectangle(frame, (lx - 4, ly - 4), (lx + size + 140, ly + size + 8), (120, 120, 120), 1)
+    paste_avatar(frame[ly : ly + size, lx : lx + size], left[1], (0, 0))
+    draw_text(frame, left[0], (lx + size + 10, ly + size - 18), scale=0.7, bg=False)
+    # Right
+    rx, ry = w - size - pad - 140, h - size - pad
+    cv2.rectangle(frame, (rx - 4, ry - 4), (rx + size + 140, ry + size + 8), (0, 0, 0), -1)
+    cv2.rectangle(frame, (rx - 4, ry - 4), (rx + size + 140, ry + size + 8), (120, 120, 120), 1)
+    paste_avatar(frame[ry : ry + size, rx : rx + size], right[1], (0, 0))
+    draw_text(frame, right[0], (rx + size + 10, ry + size - 18), scale=0.7, bg=False)
 
 
 def play_round_sound(sound: SoundPlayer, mode: str, result: str) -> None:
@@ -314,9 +387,9 @@ def play_round_sound(sound: SoundPlayer, mode: str, result: str) -> None:
 
 def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlayer):
     if key == ord("m"):
-        return frame, new_single_ctx(ctx["player_name"]), "menu"
+        return frame, None, "menu"
     if key == ord("r") and ctx.get("match_winner"):
-        return frame, new_single_ctx(ctx["player_name"]), "single"
+        return frame, new_single_ctx(ctx["player_name"], ctx["player_avatar"]), "single"
 
     predictions = detector.detect(frame, draw=True)
     for p in predictions:
@@ -325,11 +398,13 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
             break
     draw_controls(frame)
     draw_text(frame, ctx["score"].as_text((ctx["player_name"], ctx["ai_name"])), (40, 40))
+    draw_corner_profiles(frame, (ctx["player_name"], ctx["player_avatar"]), (ctx["ai_name"], ctx["ai_avatar"]))
 
     if ctx["match_winner"]:
         label = f"{ctx['player_name']} wins the match!" if ctx["match_winner"] == "p1" else f"{ctx['ai_name']} wins the match!"
-        draw_text(frame, label, (40, 90))
-        draw_text(frame, "r: rematch  m: menu  q: quit", (40, 130), scale=0.65)
+        color = (0, 255, 0) if ctx["match_winner"] == "p1" else (0, 0, 255)
+        draw_center_text(frame, label, 70, scale=1.3, color=color)
+        draw_center_text(frame, "r: rematch  m: menu  q: quit", 120, scale=0.8, color=(255, 255, 255))
         return frame, ctx, "single"
 
     if ctx["phase"] == "waiting":
@@ -365,19 +440,26 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
             (ctx["player_name"], ctx["player_move"] or "unknown", ctx["player_avatar"]),
             (ctx["ai_name"], ctx["ai_move"] or "unknown", ctx["ai_avatar"]),
         )
+        outcome = ""
+        color = (255, 255, 255)
         if ctx["round_outcome"] == "tie":
             outcome = "Tie - go again"
+            color = (255, 255, 255)
         elif ctx["round_outcome"] == "invalid":
             outcome = "Could not read your hand, try again"
+            color = (0, 0, 255)
         elif ctx["round_outcome"] == "p1":
             outcome = "You win the round"
+            color = (0, 200, 0)
         else:
-            outcome = "AI wins the round"
-        draw_text(frame, outcome, (40, 90), scale=0.9)
+            outcome = f"{ctx['ai_name']} wins the round"
+            color = (0, 0, 255)
+        draw_center_text(frame, outcome, 70, scale=1.1, color=color)
 
         if ctx["match_winner"]:
-            # Keep showing winner message until player restarts.
-            draw_text(frame, "Match point reached", (40, 170), scale=0.65)
+            label = f"{ctx['player_name']} wins the match!" if ctx["match_winner"] == "p1" else f"{ctx['ai_name']} wins the match!"
+            color = (0, 255, 0) if ctx["match_winner"] == "p1" else (0, 0, 255)
+            draw_center_text(frame, label, 110, scale=1.0, color=color)
         elif time.time() - ctx["result_time"] > RESULT_HOLD_SECONDS:
             ctx["phase"] = "waiting"
             ctx["last_beep_second"] = None
@@ -388,9 +470,9 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
 
 def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlayer):
     if key == ord("m"):
-        return frame, new_multi_ctx(ctx["left_name"], ctx["right_name"]), "menu"
+        return frame, None, "menu"
     if key == ord("r") and ctx.get("match_winner"):
-        return frame, new_multi_ctx(ctx["left_name"], ctx["right_name"]), "multi"
+        return frame, new_multi_ctx(ctx["left_name"], ctx["left_avatar"], ctx["right_name"], ctx["right_avatar"]), "multi"
 
     h, w, _ = frame.shape
     mid_x = w // 2
@@ -412,11 +494,13 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
 
     draw_controls(frame)
     draw_text(frame, ctx["score"].as_text((ctx["left_name"], ctx["right_name"])), (40, 40))
+    draw_corner_profiles(frame, (ctx["left_name"], ctx["left_avatar"]), (ctx["right_name"], ctx["right_avatar"]))
 
     if ctx["match_winner"]:
         label = f"{ctx['left_name']} wins the match" if ctx["match_winner"] == "p1" else f"{ctx['right_name']} wins the match"
-        draw_text(frame, label, (40, 90))
-        draw_text(frame, "r: rematch  m: menu  q: quit", (40, 130), scale=0.65)
+        color = (0, 255, 0) if ctx["match_winner"] == "p1" else (0, 0, 255)
+        draw_center_text(frame, label, 70, scale=1.3, color=color)
+        draw_center_text(frame, "r: rematch  m: menu  q: quit", 120, scale=0.8, color=(255, 255, 255))
         return frame, ctx, "multi"
 
     left = None
@@ -432,10 +516,10 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
             ctx["last_right"] = pred.gesture
 
     if ctx["phase"] == "waiting":
-        draw_text(frame, "Both players: place a hand inside your half", (40, 90), scale=0.7)
-        if left and right:
-            ctx["phase"] = "countdown"
+        draw_center_text(frame, "Get ready: 3-2-1-GO", 90, scale=0.9)
+        if ctx["countdown_start"] is None:
             ctx["countdown_start"] = time.time()
+            ctx["phase"] = "countdown"
             ctx["last_beep_second"] = None
             ctx["last_left"] = None
             ctx["last_right"] = None
@@ -463,6 +547,7 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
                     "phase": "result",
                     "result_time": time.time(),
                     "match_winner": ctx["score"].winner(),
+                    "countdown_start": None,
                 }
             )
     elif ctx["phase"] == "result":
@@ -471,18 +556,26 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
             (ctx["left_name"], ctx["left_move"] or "unknown", ctx["left_avatar"]),
             (ctx["right_name"], ctx["right_move"] or "unknown", ctx["right_avatar"]),
         )
+        outcome = ""
+        color = (255, 255, 255)
         if ctx["round_outcome"] == "tie":
             outcome = "Tie - go again"
+            color = (255, 255, 255)
         elif ctx["round_outcome"] == "invalid":
             outcome = "Could not read a hand, try again"
+            color = (0, 0, 255)
         elif ctx["round_outcome"] == "p1":
-            outcome = "Left player wins the round"
+            outcome = f"{ctx['left_name']} wins the round"
+            color = (0, 200, 0)
         else:
-            outcome = "Right player wins the round"
-        draw_text(frame, outcome, (40, 90), scale=0.9)
+            outcome = f"{ctx['right_name']} wins the round"
+            color = (0, 0, 255)
+        draw_center_text(frame, outcome, 70, scale=1.1, color=color)
 
         if ctx["match_winner"]:
-            draw_text(frame, "Match point reached", (40, 170), scale=0.65)
+            label = f"{ctx['left_name']} wins the match" if ctx["match_winner"] == "p1" else f"{ctx['right_name']} wins the match"
+            color = (0, 255, 0) if ctx["match_winner"] == "p1" else (0, 0, 255)
+            draw_center_text(frame, label, 110, scale=1.0, color=color)
         elif time.time() - ctx["result_time"] > RESULT_HOLD_SECONDS:
             ctx["phase"] = "waiting"
             ctx["last_beep_second"] = None
@@ -493,16 +586,6 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
 
 
 def main():
-    player_name = prompt_name("Enter your name (default: You): ", "You")
-    if prompt_name(f"Capture avatar for {player_name}? (y/n): ", "n").lower().startswith("y"):
-        capture_avatar(player_name)
-    left_name = prompt_name("Enter left player name (default: Player 1): ", "Player 1")
-    if prompt_name(f"Capture avatar for {left_name}? (y/n): ", "n").lower().startswith("y"):
-        capture_avatar(left_name)
-    right_name = prompt_name("Enter right player name (default: Player 2): ", "Player 2")
-    if prompt_name(f"Capture avatar for {right_name}? (y/n): ", "n").lower().startswith("y"):
-        capture_avatar(right_name)
-
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -510,8 +593,8 @@ def main():
     detector = HandDetector()
     sound = SoundPlayer()
     state = "menu"
-    single_ctx = new_single_ctx(player_name)
-    multi_ctx = new_multi_ctx(left_name, right_name)
+    single_ctx = None
+    multi_ctx = None
     paused = False
 
     while True:
@@ -535,14 +618,18 @@ def main():
         if state == "menu":
             frame = render_menu(frame)
             if key == ord("1"):
-                single_ctx = new_single_ctx(player_name)
+                single_ctx = setup_single_game()
                 state = "single"
             elif key == ord("2"):
-                multi_ctx = new_multi_ctx(left_name, right_name)
+                multi_ctx = setup_multi_game()
                 state = "multi"
         elif state == "single":
+            if single_ctx is None:
+                single_ctx = setup_single_game()
             frame, single_ctx, state = single_player(frame, key, detector, single_ctx, sound)
         elif state == "multi":
+            if multi_ctx is None:
+                multi_ctx = setup_multi_game()
             frame, multi_ctx, state = multi_player(frame, key, detector, multi_ctx, sound)
         if state == "quit":
             break
