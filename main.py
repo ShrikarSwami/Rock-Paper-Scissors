@@ -17,7 +17,7 @@ PFP_DIR = ASSETS_DIR / "pfps"
 WINDOW_NAME = "Rock Paper Scissors"
 COUNTDOWN_SECONDS = 3  # show 3-2-1 then GO
 RESULT_HOLD_SECONDS = 5.0
-AI_NAMES = ["Kandiddy", "Dhir", "JigglyDith", "JigglyPathi", "Skittles", "Pay Gorn", "Sigeon Pex"]
+AI_NAMES = ["Kandiddy", "Dhir", "JigglyDith", "JigglyPathi", "Skittles", "Pay Gorn", "Sigeon Pex", "Vis"]
 SOUND_FILES = {
     "countdown": SOUNDS_DIR / "countdown.mp3",  # plays on 3-2-1 ticks
     "go": SOUNDS_DIR / "go.mp3",  # plays on GO
@@ -419,7 +419,13 @@ def single_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPla
         if time.time() - ctx["countdown_start"] >= COUNTDOWN_SECONDS:
             final_preds = detector.detect(frame)
             player_move = next((p.gesture for p in final_preds if p.gesture in GESTURES), ctx["last_move"] or "unknown")
-            ai_move = choose_ai_move()
+            # Special AI behaviors
+            if ctx["ai_name"] == "Sigeon Pex" and player_move in GESTURES:
+                ai_move = {"rock": "paper", "paper": "scissors", "scissors": "rock"}[player_move]
+            elif ctx["ai_name"] == "Vis" and player_move in GESTURES:
+                ai_move = {"rock": "scissors", "paper": "rock", "scissors": "paper"}[player_move]
+            else:
+                ai_move = choose_ai_move()
             result = decide_winner(player_move, ai_move)
             if result in ("p1", "p2"):
                 ctx["score"].apply_round(result)
