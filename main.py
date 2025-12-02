@@ -252,7 +252,9 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
     h, w, _ = frame.shape
     mid_x = w // 2
 
-    # Tinted split to help players position themselves.
+    raw_frame = frame.copy()
+    predictions = detector.detect(raw_frame, draw=True)
+    # Tinted split to help players position themselves (applied after detection).
     left_overlay = frame.copy()
     right_overlay = frame.copy()
     cv2.rectangle(left_overlay, (0, 0), (mid_x, h), (255, 0, 0), -1)
@@ -261,7 +263,9 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
     cv2.addWeighted(right_overlay, 0.08, frame, 0.92, 0, frame)
     cv2.line(frame, (mid_x, 0), (mid_x, h), (200, 200, 200), 1)
 
-    predictions = detector.detect(frame, draw=True)
+    # Re-apply detected drawings onto the display frame so users can see them.
+    frame[:, :, :] = raw_frame
+
     draw_controls(frame)
     draw_text(frame, ctx["score"].as_text(("Left", "Right")), (40, 40))
 
@@ -280,8 +284,10 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
             continue
         if pred.center[0] < mid_x and left is None:
             left = pred
+            ctx["last_left"] = pred.gesture
         elif pred.center[0] >= mid_x and right is None:
             right = pred
+            ctx["last_right"] = pred.gesture
 
     if ctx["phase"] == "waiting":
         draw_text(frame, "Both players: place a hand inside your half", (40, 90), scale=0.7)
@@ -289,15 +295,19 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
             ctx["phase"] = "countdown"
             ctx["countdown_start"] = time.time()
             ctx["last_beep_second"] = None
+            ctx["last_left"] = None
+            ctx["last_right"] = None
     elif ctx["phase"] == "countdown":
         ctx["last_beep_second"] = render_countdown(frame, ctx["countdown_start"], sound, ctx["last_beep_second"])
         if time.time() - ctx["countdown_start"] >= COUNTDOWN_SECONDS:
             final_preds = detector.detect(frame)
             left_move = next(
-                (p.gesture for p in final_preds if p.center[0] < mid_x and p.gesture in GESTURES), "unknown"
+                (p.gesture for p in final_preds if p.center[0] < mid_x and p.gesture in GESTURES),
+                ctx["last_left"] or "unknown",
             )
             right_move = next(
-                (p.gesture for p in final_preds if p.center[0] >= mid_x and p.gesture in GESTURES), "unknown"
+                (p.gesture for p in final_preds if p.center[0] >= mid_x and p.gesture in GESTURES),
+                ctx["last_right"] or "unknown",
             )
             result = decide_winner(left_move, right_move)
             if result in ("p1", "p2"):
@@ -330,6 +340,8 @@ def multi_player(frame, key, detector: HandDetector, ctx: Dict, sound: SoundPlay
         elif time.time() - ctx["result_time"] > RESULT_HOLD_SECONDS:
             ctx["phase"] = "waiting"
             ctx["last_beep_second"] = None
+            ctx["last_left"] = None
+            ctx["last_right"] = None
 
     return frame, ctx, "multi"
 
