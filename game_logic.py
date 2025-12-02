@@ -39,7 +39,7 @@ def move_to_symbol(move: str) -> str:
 
 @dataclass
 class ScoreTracker:
-    target: int = 2  # best of 3 -> first to 2
+    target: int = 3  # first to 3 wins
     lead: int = 0
     p1: int = 0
     p2: int = 0
