@@ -10,6 +10,7 @@ import cv2
 
 try:
     import mediapipe as mp
+    from mediapipe import solutions as mp_solutions
 except ImportError as exc:  # pragma: no cover - dependency hint
     raise RuntimeError(
         "mediapipe is required for hand tracking. Install with `pip install mediapipe`."
@@ -27,13 +28,15 @@ class HandPrediction:
 
 class HandDetector:
     def __init__(self, max_hands: int = 2, detection_confidence: float = 0.7, tracking_confidence: float = 0.6):
-        self.hands = mp.solutions.hands.Hands(
+        self.mp_hands = mp_solutions.hands
+        self.drawer = mp_solutions.drawing_utils
+        self.hand_connections = self.mp_hands.HAND_CONNECTIONS
+        self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=max_hands,
             min_detection_confidence=detection_confidence,
             min_tracking_confidence=tracking_confidence,
         )
-        self.drawer = mp.solutions.drawing_utils
 
     def detect(self, frame, draw: bool = False) -> List[HandPrediction]:
         """
@@ -66,7 +69,7 @@ class HandDetector:
             predictions.append(prediction)
 
             if draw:
-                self.drawer.draw_landmarks(frame, lm_set, mp.solutions.hands.HAND_CONNECTIONS)
+                self.drawer.draw_landmarks(frame, lm_set, self.hand_connections)
                 cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
                 cv2.putText(
                     frame,

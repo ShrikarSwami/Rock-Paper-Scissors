@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 
 from game_logic import GESTURES, ScoreTracker, choose_ai_move, decide_winner
-from hand_detextor import HandDetector
+from hand_detector import HandDetector
 
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
